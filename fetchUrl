@@ -1,17 +1,41 @@
-// Original version created by Rico V1
+// Updated version created by Gabe
 // Specification of the file name and folder path
-var fileName = 'String extraction mypet-ch v1';  // Name of the new spreadsheet
-var folderPath = '16n6ywqz6tmCYOXGQzAmsZduQCMB9oPOW8I5RnDm3FqU';  // Folder ID where the spreadsheet will be stored
+var fileName = 'String extraction mypet-ch v2';  // Name of the new spreadsheet
 var websiteUrl = 'https://ch-mypet-com-fr.pre.mah.wpcust.com/'; // Replace with the target website URL
 
 // Main function to create spreadsheet and start processing the sitemap
 function main() {
-  var folderId = folderPath; // Folder where we want to store the new spreadsheet
+  var folderId = getScriptRootFolder(); // Get the folder where the script is located
   var spreadsheetId = createSpreadsheet(folderId); // Create the spreadsheet and get the ID
   Logger.log('Created Spreadsheet with ID: ' + spreadsheetId); // This ID can be used in subsequent scripts
   
   // After the spreadsheet is created, we proceed to fetch the sitemap and process it
   fetchSitemap2(spreadsheetId); // Pass the spreadsheetId for appending URLs
+}
+
+// Function to get the root folder of the current Google Apps Script project
+function getScriptRootFolder() {
+  var scriptFile;
+  try {
+    // Try to get the file associated with the active spreadsheet (if it exists)
+    scriptFile = DriveApp.getFileById(SpreadsheetApp.getActiveSpreadsheet().getId());
+  } catch (e) {
+    // If no active spreadsheet exists (standalone script), use the Apps Script file
+    scriptFile = DriveApp.getFileById(DriveApp.getRootFolder().getId());
+  }
+
+  var parentIterator = scriptFile.getParents();
+  
+  // Check if there are parent folders
+  if (parentIterator.hasNext()) {
+    var parentFolder = parentIterator.next();
+    Logger.log('Using parent folder: ' + parentFolder.getName());
+    return parentFolder.getId(); // Return the folder ID
+  } else {
+    // If no parent folder is found, return the root folder ID (script is likely standalone)
+    Logger.log('No parent folder found, using root folder.');
+    return DriveApp.getRootFolder().getId(); // Use the root folder as fallback
+  }
 }
 
 // Create a new Google Spreadsheet in the specified folder and return the ID
@@ -26,7 +50,7 @@ function createSpreadsheet(folderId) {
   // Get the spreadsheet ID to use in further scripts
   var spreadsheetId = spreadsheet.getId();
   Logger.log('Created spreadsheet with ID: ' + spreadsheetId);
-  
+
   // Move the spreadsheet to the specified folder
   var folder = DriveApp.getFolderById(folderId);
   var file = DriveApp.getFileById(spreadsheetId);
