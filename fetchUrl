@@ -1,0 +1,216 @@
+// Original version created by Rico V1
+// Specification of the file name and folder path
+var fileName = 'String extraction mypet-ch v1';  // Name of the new spreadsheet
+var folderPath = '16n6ywqz6tmCYOXGQzAmsZduQCMB9oPOW8I5RnDm3FqU';  // Folder ID where the spreadsheet will be stored
+var websiteUrl = 'https://ch-mypet-com-fr.pre.mah.wpcust.com/'; // Replace with the target website URL
+
+// Main function to create spreadsheet and start processing the sitemap
+function main() {
+  var folderId = folderPath; // Folder where we want to store the new spreadsheet
+  var spreadsheetId = createSpreadsheet(folderId); // Create the spreadsheet and get the ID
+  Logger.log('Created Spreadsheet with ID: ' + spreadsheetId); // This ID can be used in subsequent scripts
+  
+  // After the spreadsheet is created, we proceed to fetch the sitemap and process it
+  fetchSitemap2(spreadsheetId); // Pass the spreadsheetId for appending URLs
+}
+
+// Create a new Google Spreadsheet in the specified folder and return the ID
+function createSpreadsheet(folderId) {
+  var spreadsheet = SpreadsheetApp.create(fileName);  // Use the defined file name
+  var sheet = spreadsheet.getActiveSheet();
+  sheet.setName('Sitemap'); // Rename the first sheet to 'Sitemap'
+  
+  // Set the header in the first row (URLs will be placed here)
+  sheet.getRange('A1').setValue('URLs');
+  
+  // Get the spreadsheet ID to use in further scripts
+  var spreadsheetId = spreadsheet.getId();
+  Logger.log('Created spreadsheet with ID: ' + spreadsheetId);
+  
+  // Move the spreadsheet to the specified folder
+  var folder = DriveApp.getFolderById(folderId);
+  var file = DriveApp.getFileById(spreadsheetId);
+  folder.addFile(file);  // Move file to the folder
+
+  return spreadsheetId;  // Return the spreadsheet ID for future use
+}
+
+// Fetch the sitemap from multiple possible locations and parse it
+function fetchSitemap2(spreadsheetId) {
+  var sitemapUrls = [
+    websiteUrl + '/sitemap.xml', // Standard sitemap location
+    websiteUrl + '/sitemap_index.xml', // Sitemap index
+    websiteUrl + '/robots.txt', // Check robots.txt for sitemap links
+  ];
+
+  var sitemapContent = null;
+
+  // Try fetching the sitemap from different locations
+  for (var i = 0; i < sitemapUrls.length; i++) {
+    try {
+      var url = sitemapUrls[i];
+      Logger.log('Trying URL: ' + url);
+      
+      var response = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
+      var statusCode = response.getResponseCode();
+      
+      if (statusCode == 200) {
+        Logger.log('Found sitemap at: ' + url);
+        sitemapContent = response.getContentText();
+        break; // Exit loop once sitemap is found
+      } else {
+        Logger.log('Failed to fetch sitemap from ' + url + ' (HTTP ' + statusCode + ')');
+      }
+    } catch (e) {
+      Logger.log('Error fetching sitemap from ' + sitemapUrls[i] + ': ' + e.message);
+    }
+  }
+
+  if (!sitemapContent) {
+    Logger.log('No sitemap found in common locations, trying to crawl the website...');
+    // Crawl the homepage or key pages to search for sitemap links
+    sitemapContent = crawlForSitemapLinks(websiteUrl);
+  }
+
+  if (!sitemapContent) {
+    Logger.log('No sitemap found!');
+    return;
+  }
+
+  // Check if the content is from robots.txt, and extract any sitemaps listed there
+  if (sitemapContent.indexOf('User-agent:') !== -1 && sitemapContent.indexOf('Sitemap:') !== -1) {
+    var sitemapLinks = extractSitemapsFromRobots(sitemapContent);
+    Logger.log('Sitemaps found in robots.txt: ' + sitemapLinks.join(', '));
+    
+    // You can now fetch any of the sitemaps listed in the robots.txt (if multiple)
+    sitemapLinks.forEach(function(link) {
+      try {
+        var response = UrlFetchApp.fetch(link);
+        var xmlContent = response.getContentText();
+        parseSitemap(xmlContent, spreadsheetId); // Pass the spreadsheetId to parse and append
+      } catch (error) {
+        Logger.log('Error fetching sitemap from robots.txt link: ' + link);
+      }
+    });
+  } else {
+    parseSitemap(sitemapContent, spreadsheetId); // If sitemap was fetched directly
+  }
+}
+
+// Crawl the website to search for sitemap links in <a> tags or <link> tags
+function crawlForSitemapLinks(websiteUrl) {
+  try {
+    var response = UrlFetchApp.fetch(websiteUrl, {muteHttpExceptions: true});
+    var html = response.getContentText();
+    
+    // Look for links that might indicate a sitemap (look for .xml or sitemap in the URL)
+    var sitemapPattern = /(sitemap.*\.xml)/gi;
+    var matches = html.match(sitemapPattern);
+    
+    if (matches && matches.length > 0) {
+      Logger.log('Potential sitemap links found: ' + matches.join(', '));
+      // Attempt to fetch the sitemap from one of these links
+      return fetchSitemapFromLink(websiteUrl, matches[0]);
+    } else {
+      Logger.log('No sitemap links found on the homepage.');
+    }
+  } catch (e) {
+    Logger.log('Error crawling the homepage: ' + e.message);
+  }
+  return null;
+}
+
+// Fetch a sitemap given a potential sitemap link found during crawling
+function fetchSitemapFromLink(websiteUrl, relativeSitemapLink) {
+  var fullSitemapUrl = websiteUrl + '/' + relativeSitemapLink;
+  Logger.log('Attempting to fetch sitemap from: ' + fullSitemapUrl);
+  
+  try {
+    var response = UrlFetchApp.fetch(fullSitemapUrl);
+    var xmlContent = response.getContentText();
+    Logger.log('Found sitemap content from: ' + fullSitemapUrl);
+    return xmlContent;
+  } catch (e) {
+    Logger.log('Error fetching sitemap from ' + fullSitemapUrl + ': ' + e.message);
+  }
+  return null;
+}
+
+// Extract sitemap URLs from robots.txt content
+function extractSitemapsFromRobots(robotsTxtContent) {
+  var sitemapUrls = [];
+  var lines = robotsTxtContent.split('\n');
+  lines.forEach(function(line) {
+    if (line.toLowerCase().startsWith('sitemap:')) {
+      var sitemapUrl = line.split(':')[1].trim();
+      sitemapUrls.push(sitemapUrl);
+    }
+  });
+  return sitemapUrls;
+}
+
+// Parse the sitemap XML content and log the URLs
+function parseSitemap(xmlContent, spreadsheetId) {
+  try {
+    var document = XmlService.parse(xmlContent);
+    var root = document.getRootElement();
+    var namespace = root.getNamespace(); // Get the namespace
+    var urlElements = root.getChildren('url', namespace); // Look for <url> elements
+    var sitemapElements = root.getChildren('sitemap', namespace); // Look for <sitemap> elements (sub-sitemaps)
+    
+    // If we find sub-sitemaps, recursively fetch and parse them
+    if (sitemapElements && sitemapElements.length > 0) {
+      Logger.log('Found sub-sitemaps, processing them...');
+      sitemapElements.forEach(function(subSitemapElement) {
+        var locElement = subSitemapElement.getChild('loc', namespace);
+        if (locElement) {
+          var subSitemapUrl = locElement.getText();
+          Logger.log('Found sub-sitemap: ' + subSitemapUrl);
+          
+          // Fetch the sub-sitemap content
+          try {
+            var response = UrlFetchApp.fetch(subSitemapUrl);
+            var subSitemapContent = response.getContentText();
+            parseSitemap(subSitemapContent, spreadsheetId); // Parse the sub-sitemap
+          } catch (e) {
+            Logger.log('Error fetching sub-sitemap: ' + subSitemapUrl);
+          }
+        }
+      });
+    }
+
+    // If no sub-sitemaps are found, parse <url> elements for the main sitemap
+    if (!urlElements || urlElements.length === 0) {
+      Logger.log('No <url> elements found in the sitemap.');
+      return;
+    }
+    
+    var urls = [];
+    
+    // Iterate through each <url> and extract the <loc> (URL) element
+    urlElements.forEach(function(urlElement) {
+      var locElement = urlElement.getChild('loc', namespace);
+      if (locElement) {
+        var loc = locElement.getText(); // Get the URL from <loc>
+        urls.push([loc]); // Use an array of arrays for batch appending to the sheet
+      }
+    });
+    
+    if (urls.length === 0) {
+      Logger.log('No URLs found in the sitemap.');
+    } else {
+      Logger.log('Found URLs in sitemap, appending to sheet...');
+      appendUrlsToSheet(urls, spreadsheetId); // Append URLs to the Google Sheet
+    }
+  } catch (e) {
+    Logger.log('Error parsing sitemap XML: ' + e.message);
+  }
+}
+
+// Efficiently append URLs to the Google Sheet in batches
+function appendUrlsToSheet(urls, spreadsheetId) {
+  var spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+  var sheet = spreadsheet.getSheetByName('Sitemap');
+  // Append URLs in bulk
+  sheet.getRange(sheet.getLastRow() + 1, 1, urls.length, 1).setValues(urls);
+}
